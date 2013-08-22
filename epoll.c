@@ -151,26 +151,29 @@ void listener_callback_accept(epoll_cb *cb,uint32_t events) {
 
 void worker_callback(epoll_cb *cb, uint32_t events) {
     int fd = cb->fd;
-    int buf_len = 4;
-    char buf[buf_len];
+    int in_buf_len = 256;
+    int out_buf_len = 256;
+    char in_buf[in_buf_len];
+    char out_buf[in_buf_len];
     if (events&EPOLLIN) { // read
-        // TODO: drain the in-buffer
-        int count = read(fd, buf, buf_len);
+        int count = read(fd, in_buf, in_buf_len);
         if (-1 == count) {
             fprintf(stderr, "read failed: %s\n", strerror(errno));
             return;
         } else if (0 == count) { // peer socket closed
+            fprintf(stdout, "peer socket closed\n");
             epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
             close(fd);
             free(cb);
             return;
         }
-        buf[count] = '\0';
-        fprintf(stdout, "read from fd:%d, content:%s\n", fd, buf);
+        in_buf[count] = '\0';
+        fprintf(stdout, "read from fd:%d, content:%s\n", fd, in_buf);
+        snprintf(out_buf, out_buf_len,"from server,  fd:%d, timestamp:%ld\n",fd, (long)time(NULL));
+        write(fd,out_buf, strlen(out_buf));
     }
     if (events&EPOLLOUT){ // write
-       static int counter = 0;
-       snprintf(buf, buf_len,"hello from fd:%d, timestamp:%ld",fd, (long)time(NULL));
+       snprintf(out_buf, out_buf_len,"hello from fd:%d timestamp:%ld\n",fd, (long)time(NULL));
     }
 }
 
