@@ -134,7 +134,7 @@ void listener_callback_accept(epoll_cb *cb,uint32_t events) {
     }
 
     struct epoll_event epevt;
-    epevt.events = EPOLLIN|EPOLLOUT;
+    epevt.events = EPOLLIN;
     epoll_cb *epcb = (epoll_cb*) malloc(sizeof(epoll_cb));
     if (NULL == epcb) {
         fprintf(stderr, "malloc failed\n");
@@ -170,10 +170,33 @@ void worker_callback(epoll_cb *cb, uint32_t events) {
         in_buf[count] = '\0';
         fprintf(stdout, "read from fd:%d, content:%s\n", fd, in_buf);
         snprintf(out_buf, out_buf_len,"from server,  fd:%d, timestamp:%ld\n",fd, (long)time(NULL));
-        write(fd,out_buf, strlen(out_buf));
+        if (-1 == write(fd,out_buf, strlen(out_buf))) {
+            if (errno == EAGAIN) {
+                // register on event EPOLLOUT
+                struct epoll_event epevt;
+                epevt.events = events|EPOLLOUT;
+                epevt.data.ptr = cb;
+                epoll_ctl(epfd,EPOLL_CTL_MOD, fd, &epevt);
+            } else {
+                // failed to write
+                fprintf(stderr, "write failed:%s\n", strerror(errno));
+                return;
+            }
+        }
     }
     if (events&EPOLLOUT){ // write
-       snprintf(out_buf, out_buf_len,"hello from fd:%d timestamp:%ld\n",fd, (long)time(NULL));
+       fprintf(stdout,"EPOLLOUT");
+       snprintf(out_buf, out_buf_len,"hello from fd:%d trigered by EPOLLOUT, timestamp:%ld\n",fd, (long)time(NULL));
+       if (-1 == write(fd,out_buf, strlen(out_buf))) {
+            // failed to write
+            fprintf(stderr, "write failed:%s\n", strerror(errno));
+            return;
+       }
+       // unregister on event EPOLLOUT
+       struct epoll_event epevt;
+       epevt.events = events&(~EPOLLOUT);
+       epevt.data.ptr = cb;
+       epoll_ctl(epfd,EPOLL_CTL_MOD, fd, &epevt);
     }
 }
 
