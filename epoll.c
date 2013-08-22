@@ -9,6 +9,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <strings.h> // bzero
+#include <time.h> // time_t time(time_t *t)
 
 #define LINSTENING_PORT 7777
 #define BACKLOG_LEN 256
@@ -31,8 +33,8 @@ int epfd;
 
 int init_server();
 void handle_events(int);
-void worker_callback(int,uint32_t);
-void listener_callback_accept(int,uint32_t);
+void worker_callback(epoll_cb *,uint32_t);
+void listener_callback_accept(epoll_cb *,uint32_t);
 
 int main() {
     epfd = epoll_create(1);
@@ -110,7 +112,8 @@ int init_server() {
     return skfd;
 }
 
-void listener_callback_accept(int listenfd,uint32_t events) {
+void listener_callback_accept(epoll_cb *cb,uint32_t events) {
+    int listenfd = cb->fd;
     if (! (events & EPOLLIN)) return;
 
     fprintf(stdout, "listener_callback_accept\n");
@@ -146,23 +149,36 @@ void listener_callback_accept(int listenfd,uint32_t events) {
     epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &epevt);
 }
 
-void worker_callback(int fd, uint32_t events) {
+void worker_callback(epoll_cb *cb, uint32_t events) {
+    int fd = cb->fd;
+    int buf_len = 4;
+    char buf[buf_len];
     if (events&EPOLLIN) { // read
+        // TODO: drain the in-buffer
+        int count = read(fd, buf, buf_len);
+        if (-1 == count) {
+            fprintf(stderr, "read failed: %s\n", strerror(errno));
+            return;
+        } else if (0 == count) { // peer socket closed
+            epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
+            close(fd);
+            free(cb);
+            return;
+        }
+        buf[count] = '\0';
+        fprintf(stdout, "read from fd:%d, content:%s\n", fd, buf);
     }
     if (events&EPOLLOUT){ // write
+       static int counter = 0;
+       snprintf(buf, buf_len,"hello from fd:%d, timestamp:%ld",fd, (long)time(NULL));
     }
 }
 
 void handle_events(int count) {
     for(int i = 0; i < count; ++i) {
         epoll_cb *epcb = (epoll_cb*) event_array[i].data.ptr;
-        if (epcb->type == LISTNER) { // handle event on linster
-            void (*cb)(int,uint32_t) = (void(*)(int,uint32_t))epcb->cb;
-            cb(epcb->fd, event_array[i].events);
-            free(epcb);
-        } else {
-            // TODO
-        }
+        void (*cb)(epoll_cb *,uint32_t) = (void(*)(epoll_cb *,uint32_t))epcb->cb;
+        cb(epcb, event_array[i].events);
     }
 }
 
